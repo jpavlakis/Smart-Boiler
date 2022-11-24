@@ -1,0 +1,2 @@
+# Exclude sensitive information from codebase
+properties.py
