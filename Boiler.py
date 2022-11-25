@@ -1,6 +1,3 @@
-# Changes in this version:
-# 1.  Removed write to file function
-# 
 # Ref: https://www.youtube.com/watch?v=XW17p62AQa4 
 
 # Imports ========================================================
@@ -20,10 +17,10 @@ from tuya_connector import (
 )
 
 # Globals:
-mypath="/Python/"
-logfile="Logfile.txt"
-debug_file="Debugfile.txt"
-limits_file="Limits.txt"
+# mypath = "/Python/"
+# logfile = "Logfile.txt"
+# debug_file = "Debugfile.txt"
+limits_file = "Limits.txt"
 # Init openapi
 openapi = TuyaOpenAPI(properties.API_ENDPOINT, properties.ACCESS_ID, properties.ACCESS_KEY)
 
@@ -58,7 +55,7 @@ def read_heater_status():
     heater_status = response.get('result')[0].get('value')
     return heater_status
 
-def readBoilerTemp():
+def read_boiler_temp():
     response = requests.get(url=properties.URL)
     
     parsed_text = BeautifulSoup(response.text, features='html.parser')
@@ -90,11 +87,12 @@ if __name__ == '__main__':
     PowerIsOn = read_heater_status()
 
     #Define spesific directory for LogFile and DebugFile
-    logfilepath = os.path.join(mypath, logfile)
-    if not os.path.exists(mypath):
-        os.makedirs(mypath)
-    debug_filepath = os.path.join(mypath, debug_file)
-    limits_filepath = os.path.join(mypath, limits_file)
+    # log_filepath = os.path.join(mypath, logfile)
+    # if not os.path.exists(mypath):
+    #     os.makedirs(mypath)
+    # debug_filepath = os.path.join(mypath, debug_file)
+    # limits_filepath = os.path.join(mypath, limits_file)
+    limits_filepath = limits_file
 
     #Limits---------------------########--------------------------------
     UperLimit,  LowerLimit = read_limits(limits_filepath)
@@ -107,7 +105,7 @@ if __name__ == '__main__':
 
         time_string = time.strftime("%m/%d/%Y, %H:%M:%S", time.localtime())
         
-        Current_Temp, Average_Temp = readBoilerTemp()
+        Current_Temp, Average_Temp = read_boiler_temp()
         print(Current_Temp)
         
         #if  abs (Current_Temp - Average_Temp) > 5 :

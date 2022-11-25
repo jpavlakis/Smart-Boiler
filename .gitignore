@@ -1,2 +1,12 @@
+__pycache__/
+
 # Exclude sensitive information from codebase
 properties.py
+
+# venv related
+pyvenv.cfg
+bin/
+include/
+lib/
+lib64
+share/
