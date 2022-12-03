@@ -100,7 +100,7 @@ def read_limits(limits_filepath: str) -> tuple:
             k, v = line.strip().split('=')
             limits_dict[k.strip()] = v.strip()
 
-    return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit'), float(limits_dict.get('Update_Interval_Minutes')))
+    return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit')), int(limits_dict.get('Update_Interval_Minutes'))
 
 
 # Main ========================================================
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     
     logging.basicConfig(
         filename=LOG_FILE,
-        filemode='w',
+        filemode='a',
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
         datefmt='%d-%m-%Y %H:%M:%S %p'
