@@ -1,11 +1,13 @@
 import time
 import properties
 import requests
+import logging
 from bs4 import BeautifulSoup
 from tuya_connector import (
     TuyaOpenAPI,
 )
 
+LOG_FILE = "Boiler.log"
 LIMITS_FILE = "Limits.txt"
 BOILER_NO_ACTION = None
 BOILER_OPEN = True
@@ -17,27 +19,6 @@ TUYA_API_CONNECTION_FAIL = False
 TUYA_OPENAPI = TuyaOpenAPI(properties.API_ENDPOINT, properties.ACCESS_ID, properties.ACCESS_KEY)
 
 # Functions ========================================================
-def log_print(time_text: str, info_text: str, case: str) -> None:
-    """
-    Prints log messages.
-    Current types of log messages:
-    1. Informational
-    2. Error related
-    """
-
-    case = case.lower()
-
-    if case == "info":
-        log_type = "[INFO]"
-    elif case == "error":
-        log_type = "[ERROR]"
-    else:
-        log_type = ""
-
-    print(f'{time_text} {log_type} {info_text}')
-    return
-
-
 def connect(openapi: TuyaOpenAPI) -> bool:
     """
     Establishes connection with Tuya's server.
@@ -46,9 +27,7 @@ def connect(openapi: TuyaOpenAPI) -> bool:
     try:
         openapi.connect()
     except requests.exceptions.ConnectionError as e:
-        time_text = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
-        error_text = f"OpenAPI Connection Exception - {e}"
-        log_print(time_text=time_text, info_text=error_text, case="ERROR")
+        logging.exception(f"OpenAPI Connection Exception - {e}\n", exc_info=True)
         return TUYA_API_CONNECTION_FAIL
 
     return TUYA_API_CONNECTION_SUCCESS
@@ -95,9 +74,7 @@ def read_boiler_temp() -> tuple:
     try:
         response = requests.get(url=properties.URL)
     except requests.exceptions.ConnectionError as e:
-        time_text = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
-        error_text = f"Web Server Connection Exception - {e}"
-        log_print(time_text=time_text, info_text=error_text, case="ERROR")
+        logging.exception(f"Web Server Connection Exception - {e}\n", exc_info=True)
         return WEB_SERVER_CONNECTION_FAIL
 
     parsed_text = BeautifulSoup(response.text, features='html.parser')
@@ -123,14 +100,21 @@ def read_limits(limits_filepath: str) -> tuple:
             k, v = line.strip().split('=')
             limits_dict[k.strip()] = v.strip()
 
-    return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit'))
+    return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit'), float(limits_dict.get('Update_Interval_Minutes')))
 
 
 # Main ========================================================
 if __name__ == '__main__':
     
-    upper_temp_limit, lower_temp_limit = read_limits(LIMITS_FILE)
-    limits_update_interval_minutes = 10
+    logging.basicConfig(
+        filename=LOG_FILE,
+        filemode='w',
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%d-%m-%Y %H:%M:%S %p'
+        )
+
+    upper_temp_limit, lower_temp_limit, limits_update_interval_minutes = read_limits(LIMITS_FILE)
     current_minute = 0
     
     while True:
@@ -138,9 +122,8 @@ if __name__ == '__main__':
         current_temp, average_temp = read_boiler_temp()
         boiler_status = read_boiler_status(TUYA_OPENAPI)
 
-        time_string = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
-        log_print(time_text=time_string, info_text=f'Current Temperature: {current_temp}', case="INFO")
-        log_print(time_text=time_string, info_text=f'Boiler Powered On: {boiler_status}',  case="INFO")
+        logging.info(f'Current Temperature: {current_temp}')
+        logging.info(f'Boiler Powered On: {boiler_status}')
 
         if (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
             action = BOILER_CLOSE
@@ -157,6 +140,6 @@ if __name__ == '__main__':
         current_minute += 1
         if current_minute >= limits_update_interval_minutes : # check for changes in Limits.txt
             current_minute = 0
-            upper_temp_limit, lower_temp_limit = read_limits(LIMITS_FILE)
+            upper_temp_limit, lower_temp_limit, limits_update_interval_minutes = read_limits(LIMITS_FILE)
 
         time.sleep (59)

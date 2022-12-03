@@ -2,6 +2,7 @@ __pycache__/
 
 # Exclude sensitive information from codebase
 properties.py
+Boiler.log
 
 # venv related
 pyvenv.cfg
