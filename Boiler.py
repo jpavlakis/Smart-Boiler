@@ -1,75 +1,122 @@
-# Ref: https://www.youtube.com/watch?v=XW17p62AQa4 
-
-# Imports ========================================================
 import time
-import os
 import properties
 import requests
-import logging
-from ast import Pass, parse
-from asyncio import constants
 from bs4 import BeautifulSoup
 from tuya_connector import (
     TuyaOpenAPI,
-    TuyaOpenPulsar,
-    TuyaCloudPulsarTopic,
-    TUYA_LOGGER,
 )
 
-# Globals:
-# mypath = "/Python/"
-# logfile = "Logfile.txt"
-# debug_file = "Debugfile.txt"
-limits_file = "Limits.txt"
-# Init openapi
-openapi = TuyaOpenAPI(properties.API_ENDPOINT, properties.ACCESS_ID, properties.ACCESS_KEY)
+LIMITS_FILE = "Limits.txt"
+BOILER_NO_ACTION = None
+BOILER_OPEN = True
+BOILER_CLOSE = False
+WEB_SERVER_CONNECTION_FAIL = (-1, -1)
+
+TUYA_API_CONNECTION_SUCCESS = True
+TUYA_API_CONNECTION_FAIL = False
+TUYA_OPENAPI = TuyaOpenAPI(properties.API_ENDPOINT, properties.ACCESS_ID, properties.ACCESS_KEY)
 
 # Functions ========================================================
-def connect(openapi: TuyaOpenAPI):
+def log_print(time_text: str, info_text: str, case: str) -> None:
+    """
+    Prints log messages.
+    Current types of log messages:
+    1. Informational
+    2. Error related
+    """
+
+    case = case.lower()
+
+    if case == "info":
+        log_type = "[INFO]"
+    elif case == "error":
+        log_type = "[ERROR]"
+    else:
+        log_type = ""
+
+    print(f'{time_text} {log_type} {info_text}')
+    return
+
+
+def connect(openapi: TuyaOpenAPI) -> bool:
+    """
+    Establishes connection with Tuya's server.
+    """
+
     try:
         openapi.connect()
     except requests.exceptions.ConnectionError as e:
-        print(e)
-        return "API_CONNECTION_FAIL"
+        time_text = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
+        error_text = f"OpenAPI Connection Exception - {e}"
+        log_print(time_text=time_text, info_text=error_text, case="ERROR")
+        return TUYA_API_CONNECTION_FAIL
 
-    return "API_CONNECTION_SUCCESS"
+    return TUYA_API_CONNECTION_SUCCESS
 
-def control_heater(flag):
+def control_boiler(openapi: TuyaOpenAPI, action: bool) -> None:
+    """
+    Three possible actions to control the heater:
+    1. HEATER_OPEN
+    2. HEATER_CLOSE
+    
+    The value of parameter action in each case is
+    True or False respectively.
+    """
+
     connection_status = connect(openapi)
-    if connection_status == "API_CONNECTION_FAIL":
-        return False
+    if connection_status == TUYA_API_CONNECTION_FAIL:
+        return
 
     commands = {
-        'commands': [{'code': 'switch_1', 'value': flag}]
-    }   
-    command_response = openapi.post(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/commands', commands)
-    command_response_success = command_response.get("success")
-    return command_response_success
+        'commands': [{'code': 'switch_1', 'value': action}]
+    }
+    openapi.post(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/commands', commands)
 
-def read_heater_status():
+    return
+
+def read_boiler_status(openapi: TuyaOpenAPI) -> bool:
+    """
+    Returns boiler's status.
+    """
+
     connection_status = connect(openapi)
-    if connection_status == "API_CONNECTION_FAIL":
-        return "API_CONNECTION_FAIL"
+    if connection_status == TUYA_API_CONNECTION_FAIL:
+        return TUYA_API_CONNECTION_FAIL
 
     response = openapi.get(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/status')
     heater_status = response.get('result')[0].get('value')
     return heater_status
 
-def read_boiler_temp():
-    response = requests.get(url=properties.URL)
-    
+def read_boiler_temp() -> tuple:
+    """
+    Returns boiler's Current Temperature and Average Temperature provided by Web server API. 
+    """
+
+    try:
+        response = requests.get(url=properties.URL)
+    except requests.exceptions.ConnectionError as e:
+        time_text = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
+        error_text = f"Web Server Connection Exception - {e}"
+        log_print(time_text=time_text, info_text=error_text, case="ERROR")
+        return WEB_SERVER_CONNECTION_FAIL
+
     parsed_text = BeautifulSoup(response.text, features='html.parser')
     parsed_text = parsed_text.find('body').text
     
     boiler_temprerature_list = parsed_text.replace('[', '').replace(']', '').split(',')[1:]
     boiler_temprerature_list = [float(x) for x in boiler_temprerature_list]
 
-    Average_Temp = sum(boiler_temprerature_list[:-2]) / len(boiler_temprerature_list[:-2])
-    Current_Temp = boiler_temprerature_list[-1]
+    average_temp = sum(boiler_temprerature_list[:-2]) / len(boiler_temprerature_list[:-2])
+    current_temp = boiler_temprerature_list[-1]
     
-    return Current_Temp, Average_Temp
+    return current_temp, average_temp
 
-def read_limits(limits_filepath):
+def read_limits(limits_filepath: str) -> tuple:
+    """
+    Reads the .txt file that stores the temperature range that
+    the boiler should be in and returns those values.
+    """
+
     with open(limits_filepath, 'r') as limitsf:
         limits_dict = {}
         for line in limitsf:
@@ -77,55 +124,39 @@ def read_limits(limits_filepath):
             limits_dict[k.strip()] = v.strip()
 
     return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit'))
-   
+
 
 # Main ========================================================
-
 if __name__ == '__main__':
-    #Preliminaries..................................................
-    #Read the Heater PowerOn status 
-    PowerIsOn = read_heater_status()
+    
+    upper_temp_limit, lower_temp_limit = read_limits(LIMITS_FILE)
+    limits_update_interval_minutes = 10
+    current_minute = 0
+    
+    while True:
 
-    #Define spesific directory for LogFile and DebugFile
-    # log_filepath = os.path.join(mypath, logfile)
-    # if not os.path.exists(mypath):
-    #     os.makedirs(mypath)
-    # debug_filepath = os.path.join(mypath, debug_file)
-    # limits_filepath = os.path.join(mypath, limits_file)
-    limits_filepath = limits_file
+        current_temp, average_temp = read_boiler_temp()
+        boiler_status = read_boiler_status(TUYA_OPENAPI)
 
-    #Limits---------------------########--------------------------------
-    UperLimit,  LowerLimit = read_limits(limits_filepath)
-    flag = False
-    print(UperLimit, LowerLimit)
+        time_string = time.strftime("%m/%d/%Y %H:%M:%S", time.localtime())
+        log_print(time_text=time_string, info_text=f'Current Temperature: {current_temp}', case="INFO")
+        log_print(time_text=time_string, info_text=f'Boiler Powered On: {boiler_status}',  case="INFO")
 
-    #Body-----------------------------------------------------------------
-    n=0
-    while 1:
-
-        time_string = time.strftime("%m/%d/%Y, %H:%M:%S", time.localtime())
+        if (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
+            action = BOILER_CLOSE
         
-        Current_Temp, Average_Temp = read_boiler_temp()
-        print(Current_Temp)
+        if  current_temp > upper_temp_limit :
+            action = BOILER_CLOSE
+        elif current_temp < lower_temp_limit :
+            action = BOILER_OPEN
+        else: action = BOILER_NO_ACTION
         
-        #if  abs (Current_Temp - Average_Temp) > 5 :
-            #logf.write("  **Attention Measurement may be Wrong**")
+        if boiler_status != action != BOILER_NO_ACTION:
+            control_boiler(TUYA_OPENAPI, action)
 
-        if  Current_Temp > UperLimit :
-            flag = False
-        elif Current_Temp < LowerLimit :
-            flag = True
-        else: flag = "None"
-        
-        if PowerIsOn != flag != "None":
-            success = control_heater(flag)
-        
-        PowerIsOn = read_heater_status()
+        current_minute += 1
+        if current_minute >= limits_update_interval_minutes : # check for changes in Limits.txt
+            current_minute = 0
+            upper_temp_limit, lower_temp_limit = read_limits(LIMITS_FILE)
 
-        n += 1
-        if n>=10:
-            n = 0
-            UperLimit, LowerLimit = read_limits(limits_filepath)
-
-
-        time.sleep (59) 
+        time.sleep (59)
