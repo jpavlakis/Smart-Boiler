@@ -29,14 +29,17 @@ def connect(openapi: TuyaOpenAPI) -> bool:
     except requests.exceptions.ConnectionError as e:
         logging.exception(f"OpenAPI Connection Exception - {e}\n", exc_info=True)
         return TUYA_API_CONNECTION_FAIL
+    except requests.exceptions.ReadTimeout as e:
+        logging.exception(f"OpenAPI Connection Exception - {e}\n", exc_info=True)
+        return TUYA_API_CONNECTION_FAIL
 
     return TUYA_API_CONNECTION_SUCCESS
 
 def control_boiler(openapi: TuyaOpenAPI, action: bool) -> None:
     """
     Three possible actions to control the heater:
-    1. HEATER_OPEN
-    2. HEATER_CLOSE
+    1. BOILER_OPEN
+    2. BOILER_CLOSE
     
     The value of parameter action in each case is
     True or False respectively.
@@ -63,8 +66,13 @@ def read_boiler_status(openapi: TuyaOpenAPI) -> bool:
         return TUYA_API_CONNECTION_FAIL
 
     response = openapi.get(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/status')
-    heater_status = response.get('result')[0].get('value')
-    return heater_status
+    try:
+        boiler_status = response.get('result')[0].get('value')
+    except TypeError as e:
+        logging.exception(f"TypeError in Boiler Status Response - {e}\n", exc_info=True)
+        boiler_status = None
+    
+    return boiler_status
 
 def read_boiler_temp() -> tuple:
     """
@@ -76,7 +84,10 @@ def read_boiler_temp() -> tuple:
     except requests.exceptions.ConnectionError as e:
         logging.exception(f"Web Server Connection Exception - {e}\n", exc_info=True)
         return WEB_SERVER_CONNECTION_FAIL
-
+    except requests.exceptions.ReadTimeout as e:
+        logging.exception(f"Web Server Connection Exception - {e}\n", exc_info=True)
+        return WEB_SERVER_CONNECTION_FAIL
+    
     parsed_text = BeautifulSoup(response.text, features='html.parser')
     parsed_text = parsed_text.find('body').text
     
@@ -123,7 +134,7 @@ if __name__ == '__main__':
         boiler_status = read_boiler_status(TUYA_OPENAPI)
 
         logging.info(f'Current Temperature: {current_temp}')
-        logging.info(f'Boiler Powered On: {boiler_status}')
+        logging.info(f'Boiler Powered On:   {boiler_status}')
 
         if (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
             action = BOILER_CLOSE
