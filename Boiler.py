@@ -65,7 +65,12 @@ def read_boiler_status(openapi: TuyaOpenAPI) -> bool:
     if connection_status == TUYA_API_CONNECTION_FAIL:
         return TUYA_API_CONNECTION_FAIL
 
-    response = openapi.get(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/status')
+    try:
+        response = openapi.get(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/status')
+    except requests.exceptions.ConnectionError as e:
+        logging.exception(f"ConnectionError in Boiler Status Request - {e}\n", exc_info=True)
+        return TUYA_API_CONNECTION_FAIL
+    
     try:
         boiler_status = response.get('result')[0].get('value')
     except TypeError as e:
