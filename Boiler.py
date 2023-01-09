@@ -144,7 +144,7 @@ if __name__ == '__main__':
         if (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
             action = BOILER_CLOSE
         
-        if  current_temp > upper_temp_limit :
+        if current_temp > upper_temp_limit or current_temp == -1:
             action = BOILER_CLOSE
         elif current_temp < lower_temp_limit :
             action = BOILER_OPEN
