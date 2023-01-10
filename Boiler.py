@@ -140,11 +140,8 @@ if __name__ == '__main__':
 
         logging.info(f'Current Temperature: {current_temp}')
         logging.info(f'Boiler Powered On:   {boiler_status}')
-
-        if (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
-            action = BOILER_CLOSE
-        
-        if current_temp > upper_temp_limit or current_temp == -1:
+   
+        if current_temp > upper_temp_limit or (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
             action = BOILER_CLOSE
         elif current_temp < lower_temp_limit :
             action = BOILER_OPEN
