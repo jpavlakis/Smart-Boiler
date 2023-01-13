@@ -2,6 +2,7 @@ import time
 import properties
 import requests
 import logging
+import datetime
 from bs4 import BeautifulSoup
 from tuya_connector import (
     TuyaOpenAPI,
@@ -9,9 +10,12 @@ from tuya_connector import (
 
 LOG_FILE = "Boiler.log"
 LIMITS_FILE = "Limits.txt"
+INITIAL_DATETIME = datetime.datetime(2010, 1, 1, 1, 1, 1) #random datetime to check if boiler status has changed during runtime 
+
 BOILER_NO_ACTION = None
 BOILER_OPEN = True
 BOILER_CLOSE = False
+
 WEB_SERVER_CONNECTION_FAIL = (-1, -1)
 
 TUYA_API_CONNECTION_SUCCESS = True
@@ -35,9 +39,40 @@ def connect(openapi: TuyaOpenAPI) -> bool:
 
     return TUYA_API_CONNECTION_SUCCESS
 
-def control_boiler(openapi: TuyaOpenAPI, action: bool) -> None:
+def send_text_to_messenger(curr_boiler_status: bool, action_to_boiler: bool, last_status_change: datetime.datetime) -> None:
+    '''
+    Sends messages to personal Messenger account in the case of the boiler switching on or off.
+    Does nothing if the boiler's status doesn't change. 
+    '''
+    message_switch_on  = '►►►  BOILER SWITCHED ON'
+    message_switch_off = '◄◄◄  BOILER SWITCHED OFF'
+
+    message_to_send = message_switch_on if action_to_boiler == BOILER_OPEN and curr_boiler_status == BOILER_CLOSE else \
+                    (message_switch_off if action_to_boiler == BOILER_CLOSE and curr_boiler_status == BOILER_OPEN \
+                    else '')
+
+    if message_to_send != '':
+        if last_boiler_status_change != INITIAL_DATETIME:
+            total_time_diff_seconds = (datetime.datetime.now() - last_status_change).total_seconds()
+            time_diff_hours = divmod(total_time_diff_seconds, 3600)
+            time_diff_minutes = divmod(time_diff_hours[1], 60)
+            time_diff_seconds = divmod(time_diff_minutes[1], 1)
+            
+            message_to_send += f' after {int(time_diff_hours[0])} HOURS {int(time_diff_minutes[0])} MINUTES {int(time_diff_seconds[0])} SECONDS'
+        
+        url = f'{properties.CHATBOT_WEBHOOK_URL}&text={message_to_send}'
+        try:
+            response = requests.get(url=url)
+        except requests.exceptions.ConnectionError as e:
+            logging.exception(f"Messenger Chatbot Connection Exception - {e}\n", exc_info=True)
+        except requests.exceptions.ReadTimeout as e:
+            logging.exception(f"Messenger Chatbot Connection Exception - {e}\n", exc_info=True)
+    
+    return
+
+def control_boiler(openapi: TuyaOpenAPI, action: bool) -> bool:
     """
-    Three possible actions to control the heater:
+    Two possible actions to control the heater:
     1. BOILER_OPEN
     2. BOILER_CLOSE
     
@@ -47,14 +82,17 @@ def control_boiler(openapi: TuyaOpenAPI, action: bool) -> None:
 
     connection_status = connect(openapi)
     if connection_status == TUYA_API_CONNECTION_FAIL:
-        return
+        return TUYA_API_CONNECTION_FAIL
+
+    if action == BOILER_NO_ACTION:
+        return False
 
     commands = {
         'commands': [{'code': 'switch_1', 'value': action}]
     }
     openapi.post(f'/v1.0/iot-03/devices/{properties.DEVICE_ID}/commands', commands)
 
-    return
+    return TUYA_API_CONNECTION_SUCCESS
 
 def read_boiler_status(openapi: TuyaOpenAPI) -> bool:
     """
@@ -85,7 +123,7 @@ def read_boiler_temp() -> tuple:
     """
 
     try:
-        response = requests.get(url=properties.URL)
+        response = requests.get(url=properties.WEBSERVER_URL)
     except requests.exceptions.ConnectionError as e:
         logging.exception(f"Web Server Connection Exception - {e}\n", exc_info=True)
         return WEB_SERVER_CONNECTION_FAIL
@@ -118,7 +156,6 @@ def read_limits(limits_filepath: str) -> tuple:
 
     return float(limits_dict.get('Upper_Limit')), float(limits_dict.get('Lower_Limit')), int(limits_dict.get('Update_Interval_Minutes'))
 
-
 # Main ========================================================
 if __name__ == '__main__':
     
@@ -131,6 +168,7 @@ if __name__ == '__main__':
         )
 
     upper_temp_limit, lower_temp_limit, limits_update_interval_minutes = read_limits(LIMITS_FILE)
+    last_boiler_status_change = INITIAL_DATETIME
     current_minute = 0
     
     while True:
@@ -141,14 +179,19 @@ if __name__ == '__main__':
         logging.info(f'Current Temperature: {current_temp}')
         logging.info(f'Boiler Powered On:   {boiler_status}')
    
-        if current_temp > upper_temp_limit or (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
+        if current_temp >= upper_temp_limit or (current_temp, average_temp) == WEB_SERVER_CONNECTION_FAIL:
             action = BOILER_CLOSE
-        elif current_temp < lower_temp_limit :
+        elif current_temp <= lower_temp_limit:
             action = BOILER_OPEN
         else: action = BOILER_NO_ACTION
         
-        if boiler_status != action != BOILER_NO_ACTION:
-            control_boiler(TUYA_OPENAPI, action)
+        if (boiler_status != action) and (action != BOILER_NO_ACTION):
+            control_status = control_boiler(TUYA_OPENAPI, action)
+            if control_status:
+                change = "Switched On" if action == BOILER_OPEN else "Switched Off"
+                logging.info(f'Change to Boiler\'s status: {change}')
+                send_text_to_messenger(boiler_status, action, last_boiler_status_change)
+                last_boiler_status_change = datetime.datetime.now()
 
         current_minute += 1
         if current_minute >= limits_update_interval_minutes : # check for changes in Limits.txt
