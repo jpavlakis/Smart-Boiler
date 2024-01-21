@@ -3,6 +3,7 @@ import properties
 import requests
 import logging
 import datetime
+import pymysql
 from bs4 import BeautifulSoup
 from tuya_connector import (
     TuyaOpenAPI,
@@ -16,7 +17,8 @@ BOILER_NO_ACTION = None
 BOILER_OPEN = True
 BOILER_CLOSE = False
 
-WEB_SERVER_CONNECTION_FAIL = (-1, -1)
+# WEB_SERVER_CONNECTION_FAIL = (-1, -1)
+WEB_SERVER_CONNECTION_FAIL = {}
 
 TUYA_API_CONNECTION_SUCCESS = True
 TUYA_API_CONNECTION_FAIL = False
@@ -39,10 +41,39 @@ def connect(openapi: TuyaOpenAPI) -> bool:
 
     return TUYA_API_CONNECTION_SUCCESS
 
+def create_db_conn(usr: str, psw: str, host: str, port: int, db: str) ->  pymysql.Connection:
+    return pymysql.connect(host=host, user=usr, password=psw, db=db, port=port)
+
+def insert_to_db(data: dict, db_table: str, connection: pymysql.Connection) -> None:
+    try:
+        with connection.cursor() as cursor:
+            # SQL query for inserting data
+            sql = f'INSERT INTO {db_table} (sensor, location, value1, value2, value3, boiler, voltage) VALUES (%s, %s, %s, %s, %s, %s, %s)'
+
+            # Data preparation for insertion
+            data = [
+                    'BME280', 
+                    'Bathroom', 
+                    data.get('BME280_temp'), 
+                    data.get('BME280_hum'), 
+                    data.get('BME280_press'), 
+                    data.get('DS18B20_temp'), 
+                    data.get('BatteryVoltage')
+                ]
+            
+            # Executing SQL query
+            cursor.execute(sql, data)
+
+            # Commiting the changes
+            connection.commit()
+    finally:
+        # Closing connection
+        connection.close()
+
 def send_text_to_messenger(curr_boiler_status: bool, action_to_boiler: bool, last_status_change: datetime.datetime) -> None:
     '''
     Sends messages to personal Messenger account in the case of the boiler switching on or off.
-    Does nothing if the boiler's status doesn't change. 
+    Does nothing if the boiler's status doesn't change.
     '''
     message_switch_on  = '►►►  BOILER SWITCHED ON'
     message_switch_off = '◄◄◄  BOILER SWITCHED OFF'
@@ -117,7 +148,8 @@ def read_boiler_status(openapi: TuyaOpenAPI) -> bool:
     
     return boiler_status
 
-def read_boiler_temp() -> tuple:
+# def read_boiler_temp() -> tuple:
+def read_boiler_temp() -> dict:    
     """
     Returns boiler's Current Temperature and Average Temperature provided by Web server API. 
     """
@@ -131,16 +163,17 @@ def read_boiler_temp() -> tuple:
         logging.exception(f"Web Server Connection Exception - {e}\n", exc_info=True)
         return WEB_SERVER_CONNECTION_FAIL
     
-    parsed_text = BeautifulSoup(response.text, features='html.parser')
-    parsed_text = parsed_text.find('body').text
+    # parsed_text = BeautifulSoup(response.text, features='html.parser')
+    # parsed_text = parsed_text.find('body').text
     
-    boiler_temprerature_list = parsed_text.replace('[', '').replace(']', '').split(',')[1:]
-    boiler_temprerature_list = [float(x) for x in boiler_temprerature_list]
+    # boiler_temprerature_list = parsed_text.replace('[', '').replace(']', '').split(',')[1:]
+    # boiler_temprerature_list = [float(x) for x in boiler_temprerature_list]
 
-    average_temp = sum(boiler_temprerature_list[:-2]) / len(boiler_temprerature_list[:-2])
-    current_temp = boiler_temprerature_list[-1]
+    # average_temp = sum(boiler_temprerature_list[:-2]) / len(boiler_temprerature_list[:-2])
+    # current_temp = boiler_temprerature_list[-1]
     
-    return current_temp, average_temp
+    # return current_temp, average_temp
+    return response.json()
 
 def read_limits(limits_filepath: str) -> tuple:
     """
@@ -172,8 +205,9 @@ if __name__ == '__main__':
     current_minute = 0
     
     while True:
-
-        current_temp, average_temp = read_boiler_temp()
+        #TODO: Add db connection
+        #TODO: Add db insertion
+        current_temp, average_temp = read_boiler_temp() #TODO: Change this according to the new read_boiler_temp return value
         boiler_status = read_boiler_status(TUYA_OPENAPI)
 
         logging.info(f'Current Temperature: {current_temp}')
